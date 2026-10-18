@@ -3,6 +3,7 @@ blueprint:
   description: >-
     包裹、寄放物、社區公告的通知。每一筆異動觸發一次（同時到兩件會通知兩次），
     可分別勾選要通知的項目，再填入自己的通知動作。
+    也可在整合異常（API 連線失敗或整合無法載入）持續一段時間後通知。
 
 
     通知動作中可使用的變數：
@@ -13,7 +14,7 @@ blueprint:
 
     - `{{ link }}`：公告連結，點開才會把公告標為已讀（非公告時為空字串）
 
-    - `{{ kind }}`：事件種類，例如 `package_arrived`
+    - `{{ kind }}`：事件種類，例如 `package_arrived`、`integration_error`
 
     - `{{ data }}`：事件原始資料，例如 `{{ data.p_name }}`、`{{ data.c_dtype }}`
 
@@ -34,6 +35,7 @@ blueprint:
         - collection_deposited
         - collection_collected
         - announcement_new
+        - integration_error
       selector:
         select:
           multiple: true
@@ -49,6 +51,8 @@ blueprint:
               value: collection_collected
             - label: 新公告
               value: announcement_new
+            - label: 整合異常
+              value: integration_error
     collection_scope:
       name: 寄放物通知範圍
       default: all
@@ -83,6 +87,14 @@ blueprint:
       default: true
       selector:
         boolean: {}
+    error_delay:
+      name: 整合異常持續多久才通知
+      description: >-
+        短暫斷線不通知。HA 啟動時整合就無法載入的情況，也會在這段時間後通知。
+      default:
+        minutes: 10
+      selector:
+        duration: {}
     notify_action:
       name: 通知動作
       description: >-
@@ -125,26 +137,52 @@ blueprint:
           selector:
             text:
               multiline: true
+        integration_error_message:
+          name: 整合異常
+          description: "{{ error_detail }} 為錯誤原因。"
+          default: "⚠️ 智生活整合異常：{{ error_detail }}"
+          selector:
+            text:
+              multiline: true
 
-mode: queued
+# 整合異常的啟動檢查需要等待；用 parallel 才不會卡住其他通知
+mode: parallel
 max: 20
 
 triggers:
   - trigger: event
+    id: smartdaily_event
     event_type: smartdaily_postal_ha_package
   - trigger: event
+    id: smartdaily_event
     event_type: smartdaily_postal_ha_collection
   - trigger: event
+    id: smartdaily_event
     event_type: smartdaily_postal_ha_announcement
+  # 「API 連線異常」為 on，或整合無法載入（unavailable）持續一段時間
+  - trigger: template
+    id: integration_error
+    value_template: &error_check >-
+      {{ integration_entities('smartdaily_postal_ha')
+         | select('match', 'binary_sensor\.')
+         | select('is_state', ['on', 'unavailable'])
+         | list | count > 0 }}
+    for: !input error_delay
+  # 啟動時就已異常不會觸發上面的模板，另外檢查
+  - trigger: homeassistant
+    id: startup_check
+    event: start
 
 variables:
   selected_events: !input events
   collection_scope: !input collection_scope
   image_events: !input image_events
   image_mine_only: !input image_mine_only
-  data: "{{ trigger.event.data }}"
-  category: "{{ trigger.event.event_type | replace('smartdaily_postal_ha_', '') }}"
-  kind: "{{ category ~ '_' ~ data.type }}"
+  is_error: "{{ trigger.id in ['integration_error', 'startup_check'] }}"
+  data: "{{ {} if is_error else trigger.event.data }}"
+  category: >-
+    {{ 'integration' if is_error else trigger.event.event_type | replace('smartdaily_postal_ha_', '') }}
+  kind: "{{ 'integration_error' if is_error else category ~ '_' ~ data.type }}"
   recipient: >-
     {{ data.get('to_tablet', '') if data.get('to_name') == '全戶通知' else data.get('to_name', '') }}
   link: "{{ data.get('link', '') }}"
@@ -183,4 +221,28 @@ actions:
         sequence:
           - variables:
               message: !input announcement_new_message
+          - sequence: !input notify_action
+      - conditions: "{{ kind == 'integration_error' }}"
+        sequence:
+          - if: "{{ trigger.id == 'startup_check' }}"
+            then:
+              - condition: template
+                value_template: *error_check
+              - delay: !input error_delay
+              - condition: template
+                value_template: *error_check
+          - variables:
+              error_detail: >-
+                {%- set ns = namespace(msgs=[]) -%}
+                {%- for e in integration_entities('smartdaily_postal_ha') | select('match', 'binary_sensor\.') -%}
+                  {%- if is_state(e, 'unavailable') -%}
+                    {%- set ns.msgs = ns.msgs + ['整合無法載入'] -%}
+                  {%- elif is_state(e, 'on') -%}
+                    {%- for k, v in states[e].attributes.items() if k.startswith('Smartdaily') and v != 'OK' -%}
+                      {%- set ns.msgs = ns.msgs + [(v | string)[:150]] -%}
+                    {%- endfor -%}
+                  {%- endif -%}
+                {%- endfor -%}
+                {{ ns.msgs | unique | join('；') if ns.msgs else '無法取得資料' }}
+              message: !input integration_error_message
           - sequence: !input notify_action

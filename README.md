@@ -11,7 +11,7 @@
 - **社區公告**：未讀公告清單、最新公告（自動略過置頂的舊公告）、附件連結
 - **社區點數**
 - **事件通知**：新包裹、包裹領取、新寄放、寄放領取、新公告，**每一筆異動各觸發一次**
-- **自動化藍圖**：勾選要通知的項目、填入通知動作即可使用
+- **自動化藍圖**：勾選要通知的項目、填入通知動作即可使用，也可在整合異常時通知
 - **長期有效的連結**：照片自動轉成 JPEG（原圖為 WebP），公告附件點開時才取得
 - 初次設定與齒輪選項都可選擇要啟用的類別與更新頻率
 
@@ -110,12 +110,13 @@ https://github.com/xangin/Smartdaily_Postal_HA/blob/main/blueprints/automation/s
 
 | 設定 | 說明 |
 |---|---|
-| 通知項目 | 新包裹、包裹已領取、新寄放物、寄放物已領取、新公告（可複選） |
+| 通知項目 | 新包裹、包裹已領取、新寄放物、寄放物已領取、新公告、整合異常（可複選） |
 | 寄放物通知範圍 | 全部，或只有寄放給我們的 |
 | 附上照片的項目 | 預設為新包裹、新寄放物 |
 | 寄放物照片只在寄放給我們時附上 | 預設開啟 |
+| 整合異常持續多久才通知 | 預設 10 分鐘，短暫斷線不通知 |
 | 通知動作 | 你的通知方式，範例見下方 |
-| 訊息內容（收合區塊） | 五種訊息的範本，可自訂 |
+| 訊息內容（收合區塊） | 各通知項目的訊息範本，可自訂 |
 
 ### 通知動作可使用的變數
 
@@ -124,15 +125,26 @@ https://github.com/xangin/Smartdaily_Postal_HA/blob/main/blueprints/automation/s
 | `{{ message }}` | 訊息文字 |
 | `{{ image }}` | JPEG 照片連結；該項目未設定附照片時為空字串 |
 | `{{ link }}` | 公告連結；非公告時為空字串 |
-| `{{ kind }}` | 事件種類：`package_arrived`、`package_picked_up`、`collection_deposited`、`collection_collected`、`announcement_new` |
+| `{{ kind }}` | 事件種類：`package_arrived`、`package_picked_up`、`collection_deposited`、`collection_collected`、`announcement_new`、`integration_error` |
 | `{{ data }}` | 事件原始資料，例如 `{{ data.p_name }}`、`{{ data.c_dtype }}`、`{{ data.is_mine }}` |
 | `{{ recipient }}` | 寄放物收件人；收件人為「全戶通知」時改用戶號 |
+
+整合異常的訊息範本另外可以使用 `{{ error_detail }}`（錯誤原因）。
 
 訊息範本中同樣可以使用 `data` 與 `recipient`，例如預設的新寄放物訊息：
 
 ```jinja
 {% if data.is_mine %}有新的寄放{{ data.c_dtype }}，記得領唷!!{% else %}寄放給{{ recipient }}的{{ data.c_dtype }}已登記{% endif %}
 ```
+
+### 整合異常通知
+
+監看本整合的「API 連線異常」感測器，以下情況持續超過設定時間（預設 10 分鐘）時通知：
+
+- API 連線失敗（感測器為 `on`）
+- 整合無法載入（實體為 `unavailable`），包含 HA 啟動時就無法載入的情況
+
+不需要手動選擇實體，藍圖會自動找到本整合的感測器。
 
 ### 通知動作範例
 
