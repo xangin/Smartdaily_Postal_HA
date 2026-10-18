@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "連接智生活API",
-                "description": "⚠️ 【免責聲明】本工具僅供學術研究與個人自動化用途，開發者不對使用本工具所造成的任何帳號異常、資料外洩負責。請勿使用本工具存取非您本人授權的帳號或社區資料。\n\n🔒 【資安風險提示】您的 Device ID (條碼) 等同於您的長期登入憑證，擁有此 ID 者可查閱您的姓名、電話、地址、包裹紀錄。請確保您不在公共電腦運行此程式，並在使用後妥善保管。\n\n📋 請先照 Github 說明 (https://github.com/andyching168/Smartdaily_Postal_HA)，透過條碼辨識，複製設備ID後，填入框內。繼續設定即表示您已閱讀並同意上述條款。",
+                "description": "⚠️ 【免責聲明】本工具僅供學術研究與個人自動化用途，開發者不對使用本工具所造成的任何帳號異常、資料外洩負責。請勿使用本工具存取非您本人授權的帳號或社區資料。\n\n🔒 【資安風險提示】您的 Device ID (條碼) 等同於您的長期登入憑證，擁有此 ID 者可查閱您的姓名、電話、地址、包裹紀錄。請確保您不在公共電腦運行此程式，並在使用後妥善保管。\n\n📋 請先照 Github 說明 (https://github.com/xangin/Smartdaily_Postal_HA)，透過條碼辨識，複製設備ID後，填入框內。繼續設定即表示您已閱讀並同意上述條款。",
                 "data": {
                     "DeviceID": "設備ID"
                 }
@@ -14,15 +14,52 @@
                 "data": {
                     "com_id": "社區"
                 }
+            },
+            "features": {
+                "title": "選擇功能",
+                "description": "選擇要加入的類別與更新頻率，之後可在整合的「設定」中修改。",
+                "data": {
+                    "categories": "啟用類別",
+                    "fast_interval": "包裹／寄放物更新頻率（分鐘）",
+                    "slow_interval": "公告／點數更新頻率（分鐘）"
+                }
             }
         },
         "error": {
-            "cannot_connect": "無法連接到設備，請檢查您的資訊後重試。",
-            "invalid_auth": "提供驗證資訊無效。",
+            "cannot_connect": "無法連線智生活 API，請稍後再試。",
+            "invalid_auth": "DeviceID 無效，無法取得授權。",
+            "no_communities": "此帳號沒有任何社區。",
+            "no_categories": "請至少選擇一個類別。",
             "unknown": "發生未知錯誤。"
         },
         "abort": {
-            "already_configured": "設備已經被配置。"
+            "already_configured": "此社區已經設定過了。"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "智生活設定",
+                "description": "關閉某類別會一併移除該類別的實體。",
+                "data": {
+                    "categories": "啟用類別",
+                    "fast_interval": "包裹／寄放物更新頻率（分鐘）",
+                    "slow_interval": "公告／點數更新頻率（分鐘）"
+                }
+            }
+        },
+        "error": {
+            "no_categories": "請至少選擇一個類別。"
+        }
+    },
+    "selector": {
+        "categories": {
+            "options": {
+                "package": "包裹",
+                "collection": "寄放物",
+                "announcement": "社區公告",
+                "points": "社區點數"
+            }
         }
     }
 }

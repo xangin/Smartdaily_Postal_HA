@@ -1,0 +1,186 @@
+blueprint:
+  name: 智生活通知
+  description: >-
+    包裹、寄放物、社區公告的通知。每一筆異動觸發一次（同時到兩件會通知兩次），
+    可分別勾選要通知的項目，再填入自己的通知動作。
+
+
+    通知動作中可使用的變數：
+
+    - `{{ message }}`：訊息（可在「訊息內容」區塊自訂）
+
+    - `{{ image }}`：JPEG 照片連結（長期有效；未附照片時為空字串）
+
+    - `{{ link }}`：公告連結，點開才會把公告標為已讀（非公告時為空字串）
+
+    - `{{ kind }}`：事件種類，例如 `package_arrived`
+
+    - `{{ data }}`：事件原始資料，例如 `{{ data.p_name }}`、`{{ data.c_dtype }}`
+
+
+    照片與公告連結會優先使用 HA 的外部網址；若通知服務需要從外部抓圖（例如 LINE），
+    請先在「設定 → 系統 → 網路」設定外部網址。
+  domain: automation
+  author: xangin
+  source_url: https://github.com/xangin/Smartdaily_Postal_HA/blob/main/blueprints/automation/smartdaily_postal_ha/smartdaily_notify.yaml
+  homeassistant:
+    min_version: "2025.1.0"
+  input:
+    events:
+      name: 通知項目
+      default:
+        - package_arrived
+        - package_picked_up
+        - collection_deposited
+        - collection_collected
+        - announcement_new
+      selector:
+        select:
+          multiple: true
+          mode: list
+          options:
+            - label: 新包裹
+              value: package_arrived
+            - label: 包裹已領取
+              value: package_picked_up
+            - label: 新寄放物
+              value: collection_deposited
+            - label: 寄放物已領取
+              value: collection_collected
+            - label: 新公告
+              value: announcement_new
+    collection_scope:
+      name: 寄放物通知範圍
+      default: all
+      selector:
+        select:
+          mode: list
+          options:
+            - label: 全部（含寄放給其他住戶、我們寄放給別人的）
+              value: all
+            - label: 只有寄放給我們的
+              value: mine
+    image_events:
+      name: 附上照片的項目
+      default:
+        - package_arrived
+        - collection_deposited
+      selector:
+        select:
+          multiple: true
+          mode: list
+          options:
+            - label: 新包裹
+              value: package_arrived
+            - label: 包裹已領取
+              value: package_picked_up
+            - label: 新寄放物
+              value: collection_deposited
+            - label: 寄放物已領取
+              value: collection_collected
+    image_mine_only:
+      name: 寄放物照片只在寄放給我們時附上
+      default: true
+      selector:
+        boolean: {}
+    notify_action:
+      name: 通知動作
+      description: >-
+        例如呼叫 script.send_notify，訊息填 {{ message }}、圖片填 {{ image }}。
+      selector:
+        action: {}
+    messages:
+      name: 訊息內容
+      icon: mdi:message-text-outline
+      collapsed: true
+      input:
+        package_arrived_message:
+          name: 新包裹
+          default: "{{ data.p_name }}的{{ data.postal_typeText }}來囉！{{ '（冷藏）' if data.refrigerated else '' }}"
+          selector:
+            text:
+              multiline: true
+        package_picked_up_message:
+          name: 包裹已領取
+          default: "{{ data.p_name }}的{{ data.postal_typeText }}已領取"
+          selector:
+            text:
+              multiline: true
+        collection_deposited_message:
+          name: 新寄放物
+          description: "{{ recipient }} 為收件人；收件人是「全戶通知」時會改用戶號。"
+          default: "{% if data.is_mine %}有新的寄放{{ data.c_dtype }}，記得領唷!!{% else %}寄放給{{ recipient }}的{{ data.c_dtype }}已登記{% endif %}"
+          selector:
+            text:
+              multiline: true
+        collection_collected_message:
+          name: 寄放物已領取
+          default: "{% if data.is_mine %}我們的寄放{{ data.c_dtype }}已取件{% else %}{{ recipient }}已領取寄放的{{ data.c_dtype }}{% endif %}"
+          selector:
+            text:
+              multiline: true
+        announcement_new_message:
+          name: 新公告
+          default: "社區新公告【{{ data.TypeName }}】{{ data.Title }}"
+          selector:
+            text:
+              multiline: true
+
+mode: queued
+max: 20
+
+triggers:
+  - trigger: event
+    event_type: smartdaily_postal_ha_package
+  - trigger: event
+    event_type: smartdaily_postal_ha_collection
+  - trigger: event
+    event_type: smartdaily_postal_ha_announcement
+
+variables:
+  selected_events: !input events
+  collection_scope: !input collection_scope
+  image_events: !input image_events
+  image_mine_only: !input image_mine_only
+  data: "{{ trigger.event.data }}"
+  category: "{{ trigger.event.event_type | replace('smartdaily_postal_ha_', '') }}"
+  kind: "{{ category ~ '_' ~ data.type }}"
+  recipient: >-
+    {{ data.get('to_tablet', '') if data.get('to_name') == '全戶通知' else data.get('to_name', '') }}
+  link: "{{ data.get('link', '') }}"
+  image: >-
+    {% if kind in image_events and (category != 'collection' or not image_mine_only or data.get('is_mine')) %}{{ data.get('image_url', '') }}{% endif %}
+
+conditions:
+  - condition: template
+    value_template: "{{ kind in selected_events }}"
+  - condition: template
+    value_template: "{{ category != 'collection' or collection_scope == 'all' or data.get('is_mine') }}"
+
+actions:
+  - choose:
+      - conditions: "{{ kind == 'package_arrived' }}"
+        sequence:
+          - variables:
+              message: !input package_arrived_message
+          - sequence: !input notify_action
+      - conditions: "{{ kind == 'package_picked_up' }}"
+        sequence:
+          - variables:
+              message: !input package_picked_up_message
+          - sequence: !input notify_action
+      - conditions: "{{ kind == 'collection_deposited' }}"
+        sequence:
+          - variables:
+              message: !input collection_deposited_message
+          - sequence: !input notify_action
+      - conditions: "{{ kind == 'collection_collected' }}"
+        sequence:
+          - variables:
+              message: !input collection_collected_message
+          - sequence: !input notify_action
+      - conditions: "{{ kind == 'announcement_new' }}"
+        sequence:
+          - variables:
+              message: !input announcement_new_message
+          - sequence: !input notify_action

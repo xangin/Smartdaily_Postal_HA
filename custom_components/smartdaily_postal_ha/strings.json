@@ -1,0 +1,65 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Connect to Smartdaily",
+                "description": "Scan the barcode in the Smartdaily app to get your DeviceID (see the GitHub README). The DeviceID is a long-lived credential; keep it private.",
+                "data": {
+                    "DeviceID": "Device ID"
+                }
+            },
+            "select_community": {
+                "title": "Select community",
+                "description": "Select the community to track",
+                "data": {
+                    "com_id": "Community"
+                }
+            },
+            "features": {
+                "title": "Features",
+                "description": "Choose categories and update intervals. You can change them later in the integration options.",
+                "data": {
+                    "categories": "Categories",
+                    "fast_interval": "Package / collection update interval (minutes)",
+                    "slow_interval": "Announcement / points update interval (minutes)"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Cannot connect to the Smartdaily API.",
+            "invalid_auth": "Invalid DeviceID.",
+            "no_communities": "No communities found for this account.",
+            "no_categories": "Select at least one category.",
+            "unknown": "Unknown error."
+        },
+        "abort": {
+            "already_configured": "This community is already configured."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Smartdaily options",
+                "description": "Disabling a category removes its entities.",
+                "data": {
+                    "categories": "Categories",
+                    "fast_interval": "Package / collection update interval (minutes)",
+                    "slow_interval": "Announcement / points update interval (minutes)"
+                }
+            }
+        },
+        "error": {
+            "no_categories": "Select at least one category."
+        }
+    },
+    "selector": {
+        "categories": {
+            "options": {
+                "package": "Packages",
+                "collection": "Collections (deposited items)",
+                "announcement": "Announcements",
+                "points": "Community points"
+            }
+        }
+    }
+}

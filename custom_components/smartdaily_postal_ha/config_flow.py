@@ -1,110 +1,186 @@
+"""Config flow for the Smartdaily Postal integration."""
+
+from __future__ import annotations
+
+from typing import Any
+
 import voluptuous as vol
-from homeassistant import config_entries
+
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.core import callback
-import requests
-import aiohttp
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
-DOMAIN = "smartdaily_postal_ha"
-KingnetAuthValue = ""
+from .api import SmartdailyApi, SmartdailyAuthError, SmartdailyError
+from .const import (
+    ALL_CATEGORIES,
+    CONF_CATEGORIES,
+    CONF_COM_ID,
+    CONF_DEVICE_ID,
+    CONF_FAST_INTERVAL,
+    CONF_SLOW_INTERVAL,
+    DEFAULT_FAST_INTERVAL,
+    DEFAULT_SLOW_INTERVAL,
+    DOMAIN,
+)
+
+DEFAULT_OPTIONS = {
+    CONF_CATEGORIES: ALL_CATEGORIES,
+    CONF_FAST_INTERVAL: DEFAULT_FAST_INTERVAL,
+    CONF_SLOW_INTERVAL: DEFAULT_SLOW_INTERVAL,
+}
+
+OPTIONS_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_CATEGORIES): SelectSelector(
+            SelectSelectorConfig(
+                options=ALL_CATEGORIES,
+                multiple=True,
+                mode=SelectSelectorMode.LIST,
+                translation_key=CONF_CATEGORIES,
+            )
+        ),
+        vol.Required(CONF_FAST_INTERVAL): NumberSelector(
+            NumberSelectorConfig(
+                min=1, max=60, step=1, mode=NumberSelectorMode.BOX,
+                unit_of_measurement="min",
+            )
+        ),
+        vol.Required(CONF_SLOW_INTERVAL): NumberSelector(
+            NumberSelectorConfig(
+                min=10, max=1440, step=1, mode=NumberSelectorMode.BOX,
+                unit_of_measurement="min",
+            )
+        ),
+    }
+)
 
 
-class MyParcelTrackerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """smartdaily_postal_ha config flow."""
+def _normalize(user_input: dict[str, Any]) -> dict[str, Any]:
+    return {
+        CONF_CATEGORIES: [c for c in ALL_CATEGORIES if c in user_input[CONF_CATEGORIES]],
+        CONF_FAST_INTERVAL: int(user_input[CONF_FAST_INTERVAL]),
+        CONF_SLOW_INTERVAL: int(user_input[CONF_SLOW_INTERVAL]),
+    }
 
-    async def async_step_user(self, user_input=None):
-        """Handle a flow initialized by the user."""
-        errors = {}
+
+class SmartdailyConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for Smartdaily."""
+
+    VERSION = 1
+
+    def __init__(self) -> None:
+        self._device_id: str = ""
+        self._communities: dict[str, str] = {}
+        self._com_id: str = ""
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """輸入 DeviceID。"""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self.device_id = user_input["DeviceID"]  # 获取DeviceID的值
-            url = (
-                "https://api.smartdaily.com.tw/api/Valid/getHashCodeV2?code="
-                + self.device_id
-            )
-            headers = {
-                "Connection": "keep-alive",
-                "Accept": "application/json, text/plain, */*"
-            }
-            response = await self.hass.async_add_executor_job(
-                requests.get, url, headers
-            )
-            if response.status_code == 200:
-                print("Success!\nResult:\n")
-                print(response.text)
-                print("\n------Beautify------\n")
-                # 解析JSON數據
-                data = response.json()
-
-                self.KingnetAuthValue = "CommunityUser " + data["Data"]["token"]
-                print(KingnetAuthValue)
+            device_id = user_input[CONF_DEVICE_ID].strip()
+            api = SmartdailyApi(async_get_clientsession(self.hass), device_id)
+            try:
+                communities = await api.get_communities()
+            except SmartdailyAuthError:
+                errors["base"] = "invalid_auth"
+            except SmartdailyError:
+                errors["base"] = "cannot_connect"
             else:
-                print("請求失敗，狀態碼:", response.status_code)
-            # 尝试使用DeviceID获取KingnetAuth令牌和社区列表
-            # 这里需要添加逻辑来调用API
-            # ...
-
-            # 假设成功，转到社区选择步骤
-            return await self.async_step_select_community()
+                if not communities:
+                    errors["base"] = "no_communities"
+                else:
+                    self._device_id = device_id
+                    self._communities = {
+                        str(c["id"]): c.get("community", str(c["id"]))
+                        for c in communities
+                    }
+                    return await self.async_step_select_community()
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("DeviceID"): str,
-                }
-            ),
+            data_schema=vol.Schema({vol.Required(CONF_DEVICE_ID): str}),
             errors=errors,
         )
 
-    async def async_step_select_community(self, user_input=None):
-        """Handle the step to select a community."""
-        errors = {}
+    async def async_step_select_community(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """選擇社區。"""
         if user_input is not None:
-            # 用户已选择社区，存储选定的社区ID并创建配置条目
-            return self.async_create_entry(
-                title="My Parcel Tracker",
-                data={"DeviceID": self.device_id, "com_id": user_input["com_id"]},
-            )
-
-        # 获取社区列表并生成选项
-        communities = await self._get_communities(self.KingnetAuthValue)
-        options = {com["id"]: com["community"] for com in communities}
+            self._com_id = user_input[CONF_COM_ID]
+            await self.async_set_unique_id(f"{self._device_id}_{self._com_id}")
+            self._abort_if_unique_id_configured()
+            return await self.async_step_features()
 
         return self.async_show_form(
             step_id="select_community",
             data_schema=vol.Schema(
-                {
-                    vol.Required("com_id", description="選擇社區"): vol.In(options),
-                }
+                {vol.Required(CONF_COM_ID): vol.In(self._communities)}
+            ),
+        )
+
+    async def async_step_features(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """選擇要啟用的類別與更新頻率。"""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if not user_input.get(CONF_CATEGORIES):
+                errors["base"] = "no_categories"
+            else:
+                return self.async_create_entry(
+                    title=f"智生活 {self._communities[self._com_id]}",
+                    data={CONF_DEVICE_ID: self._device_id, CONF_COM_ID: self._com_id},
+                    options=_normalize(user_input),
+                )
+
+        return self.async_show_form(
+            step_id="features",
+            data_schema=self.add_suggested_values_to_schema(
+                OPTIONS_SCHEMA, user_input or DEFAULT_OPTIONS
             ),
             errors=errors,
         )
 
-    async def _get_communities(self, KingnetAuthValue):
-        """获取社区列表。"""
-        headers = {
-            "Connection": "keep-alive",
-            "KingnetAuth": self.KingnetAuthValue,
-            "Accept": "application/json, text/plain, */*"
-        }
-        communities = []  # 初始化空列表用于存储社区信息
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://api.smartdaily.com.tw/api/Community/GetUserCommunityList",
-                headers=headers,
-            ) as response:
-                print("-----------")
-                print(headers)
-                if response.status == 200:
-                    data = await response.json()  # 使用await等待异步操作完成
-                    for com in data["Data"]:
-                        # 将每个社区的信息添加到列表中
-                        communities.append(
-                            {"id": com["id"], "community": com["community"]}
-                        )
-                else:
-                    print("请求失败，状态码:", response.status)
-                    text = await response.text()  # 使用await获取响应文本
-                    print(text)
-                    # 可以考虑抛出异常或进行其他错误处理
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> SmartdailyOptionsFlow:
+        return SmartdailyOptionsFlow()
 
-        return communities
+
+class SmartdailyOptionsFlow(OptionsFlow):
+    """齒輪設定：調整類別與更新頻率，儲存後自動重新載入。"""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if not user_input.get(CONF_CATEGORIES):
+                errors["base"] = "no_categories"
+            else:
+                return self.async_create_entry(data=_normalize(user_input))
+
+        current = {**DEFAULT_OPTIONS, **self.config_entry.options}
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(
+                OPTIONS_SCHEMA, user_input or current
+            ),
+            errors=errors,
+        )
