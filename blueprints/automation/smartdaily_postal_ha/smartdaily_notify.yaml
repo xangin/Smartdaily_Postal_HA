@@ -10,7 +10,11 @@ blueprint:
 
     - `{{ message }}`：訊息（可在「訊息內容」區塊自訂）
 
-    - `{{ image }}`：JPEG 照片連結（長期有效；未附照片時為空字串）
+    - `{{ image }}`：本機 JPEG 照片檔案路徑（未附照片或取得失敗時為空字串）
+
+    - `{{ image_url }}`：照片的外部連結（給需要網址的通知服務）
+
+    - `{{ image_relative_url }}`：照片的相對連結（給 Companion App）
 
     - `{{ link }}`：公告連結，點開才會把公告標為已讀（非公告時為空字串）
 
@@ -19,13 +23,13 @@ blueprint:
     - `{{ data }}`：事件原始資料，例如 `{{ data.p_name }}`、`{{ data.c_dtype }}`
 
 
-    照片與公告連結會優先使用 HA 的外部網址；若通知服務需要從外部抓圖（例如 LINE），
-    請先在「設定 → 系統 → 網路」設定外部網址。
+    照片會先存成本機檔案再交給通知動作，不需要讓通知服務從外部連回 HA。
+    照片取得失敗時仍會發送不含照片的通知。
   domain: automation
   author: xangin
   source_url: https://github.com/xangin/Smartdaily_Postal_HA/blob/main/blueprints/automation/smartdaily_postal_ha/smartdaily_notify.yaml
   homeassistant:
-    min_version: "2025.1.0"
+    min_version: "2025.4.0"
   input:
     events:
       name: 通知項目
@@ -87,6 +91,14 @@ blueprint:
       default: true
       selector:
         boolean: {}
+    image_dir:
+      name: 照片存放資料夾
+      description: >-
+        留空則存到媒體資料夾下的 smartdaily_postal_ha（HAOS 為 /media/smartdaily_postal_ha）。
+        須在允許寫入的資料夾內；超過 7 天的照片會自動刪除。
+      default: ""
+      selector:
+        text: {}
     error_delay:
       name: 整合異常持續多久才通知
       description: >-
@@ -186,8 +198,10 @@ variables:
   recipient: >-
     {{ data.get('to_tablet', '') if data.get('to_name') == '全戶通知' else data.get('to_name', '') }}
   link: "{{ data.get('link', '') }}"
-  image: >-
-    {% if kind in image_events and (category != 'collection' or not image_mine_only or data.get('is_mine')) %}{{ data.get('image_url', '') }}{% endif %}
+  want_image: >-
+    {{ kind in image_events and data.get('image_key', '') != ''
+       and (category != 'collection' or not image_mine_only or data.get('is_mine', false)) }}
+  image_dir: !input image_dir
 
 conditions:
   - condition: template
@@ -196,6 +210,23 @@ conditions:
     value_template: "{{ category != 'collection' or collection_scope == 'all' or data.get('is_mine') }}"
 
 actions:
+  # 把這一筆的照片存成本機 JPEG（照片剛登記時會等待重試），失敗則不附照片
+  - variables:
+      saved: {}
+  - if: "{{ want_image }}"
+    then:
+      - action: smartdaily_postal_ha.save_image
+        continue_on_error: true
+        response_variable: saved
+        data:
+          entry_id: "{{ data.entry_id }}"
+          category: "{{ category }}"
+          key: "{{ data.image_key }}"
+          directory: "{{ image_dir }}"
+  - variables:
+      image: "{{ saved.get('path', '') if saved is mapping else '' }}"
+      image_url: "{{ data.get('image_url', '') if want_image else '' }}"
+      image_relative_url: "{{ data.get('image_path', '') if want_image else '' }}"
   - choose:
       - conditions: "{{ kind == 'package_arrived' }}"
         sequence:

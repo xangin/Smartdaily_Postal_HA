@@ -29,6 +29,7 @@ from .const import (
 from .coordinator import SmartdailyCoordinator, SmartdailyRuntime, SnapshotStore
 from .entity import expected_unique_ids
 from .links import LinkSigner
+from .services import async_register_services
 from .views import SmartdailyAnnouncementView, SmartdailyImageView
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,9 +42,10 @@ type SmartdailyConfigEntry = ConfigEntry[SmartdailyRuntime]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> None | bool:
-    """註冊照片與公告連結的 HTTP view。"""
+    """註冊照片與公告連結的 HTTP view，以及 save_image 動作。"""
     hass.http.register_view(SmartdailyImageView())
     hass.http.register_view(SmartdailyAnnouncementView())
+    async_register_services(hass)
     return True
 
 

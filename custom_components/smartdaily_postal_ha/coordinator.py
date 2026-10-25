@@ -275,9 +275,11 @@ class SmartdailyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _add_image_links(self, category: str, items: list[dict], key_fn) -> None:
         """加上長期有效的 JPEG 照片連結（image_url 給通知、image_path 給儀表板）。"""
         for item in items:
-            link = self.runtime.links.image(category, key_fn(item))
+            key = key_fn(item)
+            link = self.runtime.links.image(category, key)
             item["image_url"] = link["url"]
             item["image_path"] = link["path"]
+            item["image_key"] = key  # 給 save_image 動作使用
 
     def _process_points(self, profile: dict) -> dict:
         info = self.runtime.update_profile(profile)

@@ -12,7 +12,8 @@
 - **社區點數**
 - **事件通知**：新包裹、包裹領取、新寄放、寄放領取、新公告，**每一筆異動各觸發一次**
 - **自動化藍圖**：勾選要通知的項目、填入通知動作即可使用，也可在整合異常時通知
-- **長期有效的連結**：照片自動轉成 JPEG（原圖為 WebP），公告附件點開時才取得
+- **照片存檔動作**：把該筆包裹／寄放物的照片存成本機 JPEG（原圖為 WebP），通知不需讓外部服務連回 HA
+- **長期有效的連結**：照片 JPEG 連結，公告附件點開時才取得
 - 初次設定與齒輪選項都可選擇要啟用的類別與更新頻率
 
 ## 📦 安裝
@@ -80,6 +81,7 @@
 | `is_mine` | 寄放物是否寄放給自己的戶號 |
 | `image_url` | 長期有效的 JPEG 照片連結（優先使用 HA 外部網址，給通知用） |
 | `image_path` | 同上的相對路徑（給儀表板用） |
+| `image_key` | 給 `save_image` 動作使用的項目識別 |
 | `link`／`link_path` | 公告連結（見下方說明） |
 
 ## 🔔 事件
@@ -106,6 +108,8 @@
 https://github.com/xangin/Smartdaily_Postal_HA/blob/main/blueprints/automation/smartdaily_postal_ha/smartdaily_notify.yaml
 ```
 
+> 藍圖需要 Home Assistant 2025.4 以上。
+
 ### 藍圖設定
 
 | 設定 | 說明 |
@@ -114,6 +118,7 @@ https://github.com/xangin/Smartdaily_Postal_HA/blob/main/blueprints/automation/s
 | 寄放物通知範圍 | 全部，或只有寄放給我們的 |
 | 附上照片的項目 | 預設為新包裹、新寄放物 |
 | 寄放物照片只在寄放給我們時附上 | 預設開啟 |
+| 照片存放資料夾 | 留空則存到媒體資料夾下的 `smartdaily_postal_ha`（HAOS 為 `/media/smartdaily_postal_ha`），超過 7 天自動刪除 |
 | 整合異常持續多久才通知 | 預設 10 分鐘，短暫斷線不通知 |
 | 通知動作 | 你的通知方式，範例見下方 |
 | 訊息內容（收合區塊） | 各通知項目的訊息範本，可自訂 |
@@ -123,7 +128,9 @@ https://github.com/xangin/Smartdaily_Postal_HA/blob/main/blueprints/automation/s
 | 變數 | 說明 |
 |---|---|
 | `{{ message }}` | 訊息文字 |
-| `{{ image }}` | JPEG 照片連結；該項目未設定附照片時為空字串 |
+| `{{ image }}` | **本機 JPEG 照片檔案路徑**；未附照片或取得失敗時為空字串 |
+| `{{ image_url }}` | 照片的外部連結（需要網址的通知服務用，HA 必須能從外部連線） |
+| `{{ image_relative_url }}` | 照片的相對連結（Companion App 用） |
 | `{{ link }}` | 公告連結；非公告時為空字串 |
 | `{{ kind }}` | 事件種類：`package_arrived`、`package_picked_up`、`collection_deposited`、`collection_collected`、`announcement_new`、`integration_error` |
 | `{{ data }}` | 事件原始資料，例如 `{{ data.p_name }}`、`{{ data.c_dtype }}`、`{{ data.is_mine }}` |
@@ -146,13 +153,21 @@ https://github.com/xangin/Smartdaily_Postal_HA/blob/main/blueprints/automation/s
 
 不需要手動選擇實體，藍圖會自動找到本整合的感測器。
 
+### 照片如何附上
+
+勾選「附上照片」的項目，藍圖會先呼叫 `smartdaily_postal_ha.save_image`（見下方「動作 save_image」）把**該筆**的照片存成本機 JPEG，再執行通知動作，`{{ image }}` 就是檔案路徑：
+
+- 通知服務直接讀取本機檔案，不需要從外部連回 HA，也不需要設定外部網址
+- 剛登記的包裹照片可能還沒上傳，會等待重試最多 30 秒
+- 照片取得失敗時，仍會發送**不含照片**的通知
+
 ### 通知動作範例
 
 在藍圖的「通知動作」選擇「新增動作」，或點右上角選單「以 YAML 編輯」貼上以下其中一種。
 
 #### 1. 自訂通知腳本
 
-如果你已經有自己的通知腳本（以下以接受 `message` 與 `img` 欄位的 `script.send_notify` 為例）：
+如果你已經有自己的通知腳本（以下以接受 `message` 與 `img` 欄位的 `script.send_notify` 為例，`img` 需能接受本機檔案路徑）：
 
 ```yaml
 - action: script.send_notify
@@ -187,24 +202,24 @@ https://github.com/xangin/Smartdaily_Postal_HA/blob/main/blueprints/automation/s
     message: "{{ message }}"
     data: >-
       {%- set ns = namespace(d={}) -%}
-      {%- if image -%}{%- set ns.d = dict(ns.d, image=image) -%}{%- endif -%}
+      {%- if image_relative_url -%}{%- set ns.d = dict(ns.d, image=image_relative_url) -%}{%- endif -%}
       {%- if link -%}{%- set ns.d = dict(ns.d, url=link, clickAction=link) -%}{%- endif -%}
       {{ ns.d }}
 ```
 
-- 有照片時通知會顯示縮圖
+- 有照片時通知會顯示縮圖（Companion App 以自己的 HA 連線讀取相對連結，不需外部網址）
 - 新公告通知點下去會開啟公告（iOS 使用 `url`，Android 使用 `clickAction`）
 
 #### 3. Telegram
 
-需先設定 [Telegram bot](https://www.home-assistant.io/integrations/telegram_bot/) 整合。有照片時以圖片＋說明文字傳送，否則傳送文字：
+需先設定 [Telegram bot](https://www.home-assistant.io/integrations/telegram_bot/) 整合。有照片時以本機照片檔＋說明文字傳送，否則傳送文字：
 
 ```yaml
 - if: "{{ image != '' }}"
   then:
     - action: telegram_bot.send_photo
       data:
-        url: "{{ image }}"
+        file: "{{ image }}"
         caption: "{{ message }}"
   else:
     - action: telegram_bot.send_message
@@ -213,6 +228,39 @@ https://github.com/xangin/Smartdaily_Postal_HA/blob/main/blueprints/automation/s
 ```
 
 > 有多個 bot 或聊天室時，請依 Telegram 整合文件加上 `config_entry_id` 或 `target`。
+
+## 🛠️ 動作 save_image
+
+`smartdaily_postal_ha.save_image` 把指定包裹／寄放物的照片存成本機 JPEG，並回傳檔案路徑。藍圖已內建使用，也可以在自己的自動化中呼叫：
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: smartdaily_postal_ha_package
+    event_data:
+      type: arrived
+actions:
+  - action: smartdaily_postal_ha.save_image
+    data:
+      entry_id: "{{ trigger.event.data.entry_id }}"
+      category: package          # 寄放物為 collection
+      key: "{{ trigger.event.data.image_key }}"
+    response_variable: saved
+  - action: script.send_notify
+    data:
+      message: "{{ trigger.event.data.p_name }}的包裹來囉！"
+      img: "{{ saved.path }}"
+```
+
+| 欄位 | 說明 |
+|---|---|
+| `entry_id` | 事件資料中的 `entry_id` |
+| `category` | `package` 或 `collection` |
+| `key` | 事件資料中的 `image_key` |
+| `directory` | 選填，存放資料夾，須在允許寫入的資料夾內；預設為媒體資料夾下的 `smartdaily_postal_ha` |
+| `wait` | 選填，照片尚未提供時重試的秒數，預設 30 |
+
+回傳 `{"path": "/media/smartdaily_postal_ha/package_xxxx.jpg"}`。超過 7 天的照片會自動刪除。
 
 ## 🔗 照片與公告連結
 
@@ -224,7 +272,7 @@ https://github.com/xangin/Smartdaily_Postal_HA/blob/main/blueprints/automation/s
 注意事項：
 
 - ⚠️ 智生活的公告內容 API 會**將公告標為已讀**。本整合背景更新只讀取公告清單，**不會**改變已讀狀態，只有實際點開公告連結時才會標為已讀。
-- 連結優先使用 HA 的**外部網址**（「設定」→「系統」→「網路」）。通知服務若需從外部抓圖（例如 LINE），HA 必須能從網際網路連線；未設定外部網址時連結為相對路徑，只能在 HA 介面內使用。
+- 連結優先使用 HA 的**外部網址**（「設定」→「系統」→「網路」）。若外部網址未設定或指向其他主機，外部服務抓圖會失敗，**通知請改用 `save_image` 的本機檔案**（藍圖預設做法）。
 - 連結以簽名保護，**不需登入即可開啟**，只能存取該張照片或該則公告。請勿將連結公開分享。
 
 ## 📊 儀表板範例

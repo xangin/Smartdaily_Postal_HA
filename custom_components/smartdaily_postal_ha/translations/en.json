@@ -60,6 +60,40 @@
                 "announcement": "Announcements",
                 "points": "Community points"
             }
+        },
+        "image_category": {
+            "options": {
+                "package": "Package",
+                "collection": "Collection"
+            }
+        }
+    },
+    "services": {
+        "save_image": {
+            "name": "Save photo",
+            "description": "Save the photo of a package or collection item as a local JPEG file and return its path.",
+            "fields": {
+                "entry_id": {
+                    "name": "Integration entry",
+                    "description": "The Smartdaily integration entry (event data: entry_id)."
+                },
+                "category": {
+                    "name": "Category",
+                    "description": "package or collection."
+                },
+                "key": {
+                    "name": "Item key",
+                    "description": "Event data field image_key."
+                },
+                "directory": {
+                    "name": "Directory",
+                    "description": "Folder to save into. Must be allowed by allowlist_external_dirs. Default: <media>/smartdaily_postal_ha."
+                },
+                "wait": {
+                    "name": "Wait",
+                    "description": "Seconds to keep retrying when the photo is not available yet (newly registered items)."
+                }
+            }
         }
     }
 }

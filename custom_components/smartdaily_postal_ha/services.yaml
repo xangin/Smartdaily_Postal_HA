@@ -1,0 +1,33 @@
+save_image:
+  fields:
+    entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: smartdaily_postal_ha
+    category:
+      required: true
+      selector:
+        select:
+          options:
+            - package
+            - collection
+          translation_key: image_category
+    key:
+      required: true
+      example: "{{ trigger.event.data.image_key }}"
+      selector:
+        text:
+    directory:
+      required: false
+      example: /media/smartdaily_postal_ha
+      selector:
+        text:
+    wait:
+      required: false
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 120
+          unit_of_measurement: s

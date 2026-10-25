@@ -5,37 +5,20 @@ from __future__ import annotations
 import html
 import logging
 
-from aiohttp import ClientError, ClientTimeout, web
+from aiohttp import web
 
-from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.http import KEY_HASS, HomeAssistantView
 
 from . import parsers
 from .api import SmartdailyError
-from .const import CAT_COLLECTION, CAT_PACKAGE, DOMAIN
+from .const import DOMAIN
 from .coordinator import SmartdailyRuntime
-from .images import to_jpeg
-from .links import URL_BASE, item_id
+from .links import URL_BASE
+from .photos import IMAGE_SOURCES, async_get_photo, get_runtime
 
 _LOGGER = logging.getLogger(__name__)
-TIMEOUT = ClientTimeout(total=15)
-IMAGE_CACHE_SIZE = 30
 IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
-
-# category -> (key 函式, 照片欄位)
-IMAGE_SOURCES = {
-    CAT_PACKAGE: (parsers.package_key, "postal_img"),
-    CAT_COLLECTION: (parsers.collection_key, "CollectionImage"),
-}
-
-
-def _runtime(hass: HomeAssistant, entry_id: str) -> SmartdailyRuntime | None:
-    entry = hass.config_entries.async_get_entry(entry_id)
-    if entry is None or entry.domain != DOMAIN or entry.state is not ConfigEntryState.LOADED:
-        return None
-    return entry.runtime_data
+LINK_WAIT = 10  # 秒；外部服務下載逾時多為 20 秒
 
 
 def _authorized(runtime: SmartdailyRuntime, request: web.Request) -> bool:
@@ -55,69 +38,24 @@ class SmartdailyImageView(HomeAssistantView):
         self, request: web.Request, entry_id: str, category: str, item: str
     ) -> web.Response:
         hass = request.app[KEY_HASS]
-        runtime = _runtime(hass, entry_id)
+        runtime = get_runtime(hass, entry_id)
         if runtime is None or category not in IMAGE_SOURCES:
             return web.Response(status=404)
         if not _authorized(runtime, request):
             return web.Response(status=403)
-
-        cache_key = f"{category}/{item}"
-        if (cached := runtime.image_cache.get(cache_key)) is None:
-            raw = await self._download(hass, runtime, category, item)
-            if raw is None:
-                return web.Response(status=404)
-            try:
-                cached = await hass.async_add_executor_job(to_jpeg, raw)
-            except Exception:  # noqa: BLE001
-                _LOGGER.exception("照片轉 JPEG 失敗")
-                return web.Response(status=500)
-            runtime.image_cache[cache_key] = cached
-            while len(runtime.image_cache) > IMAGE_CACHE_SIZE:
-                runtime.image_cache.popitem(last=False)
+        try:
+            jpeg = await async_get_photo(hass, runtime, category, item, wait=LINK_WAIT)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("照片轉 JPEG 失敗")
+            return web.Response(status=500)
+        if jpeg is None:
+            # 照片尚未提供（剛登記時可能還沒上傳）
+            return web.Response(status=404, headers={"Cache-Control": "no-store"})
         return web.Response(
-            body=cached,
+            body=jpeg,
             content_type="image/jpeg",
             headers={"Cache-Control": "private, max-age=86400"},
         )
-
-    async def _download(
-        self, hass: HomeAssistant, runtime: SmartdailyRuntime, category: str, item: str
-    ) -> bytes | None:
-        """先用 coordinator 資料中的網址；過期（15 分鐘）就重新向 API 取得。"""
-        key_fn, field = IMAGE_SOURCES[category]
-        session = async_get_clientsession(hass)
-        for fresh in (False, True):
-            record = await self._find(runtime, category, item, key_fn, fresh)
-            if record is None:
-                continue
-            url = record.get(field)
-            if not url:
-                return None
-            try:
-                async with session.get(url, timeout=TIMEOUT) as resp:
-                    if resp.status == 200:
-                        return await resp.read()
-                    _LOGGER.debug("照片網址回應 HTTP %s（fresh=%s）", resp.status, fresh)
-            except (ClientError, TimeoutError) as err:
-                _LOGGER.debug("下載照片失敗：%s", err)
-        return None
-
-    async def _find(
-        self, runtime: SmartdailyRuntime, category: str, item: str, key_fn, fresh: bool
-    ) -> dict | None:
-        if fresh:
-            try:
-                if category == CAT_PACKAGE:
-                    records = await runtime.api.get_packages(runtime.com_id)
-                else:
-                    records = await runtime.api.get_collections()
-            except SmartdailyError as err:
-                _LOGGER.warning("取得照片資料失敗：%s", err)
-                return None
-        else:
-            data = (runtime.coordinator_for(category).data or {}).get(category) or {}
-            records = (data.get("unclaimed") or []) + (data.get("claimed") or [])
-        return next((r for r in records if item_id(key_fn(r)) == item), None)
 
 
 class SmartdailyAnnouncementView(HomeAssistantView):
@@ -134,7 +72,7 @@ class SmartdailyAnnouncementView(HomeAssistantView):
         self, request: web.Request, entry_id: str, announcement_id: str
     ) -> web.Response:
         hass = request.app[KEY_HASS]
-        runtime = _runtime(hass, entry_id)
+        runtime = get_runtime(hass, entry_id)
         if runtime is None:
             return web.Response(status=404)
         if not _authorized(runtime, request):

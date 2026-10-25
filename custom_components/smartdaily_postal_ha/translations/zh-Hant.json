@@ -60,6 +60,40 @@
                 "announcement": "社區公告",
                 "points": "社區點數"
             }
+        },
+        "image_category": {
+            "options": {
+                "package": "包裹",
+                "collection": "寄放物"
+            }
+        }
+    },
+    "services": {
+        "save_image": {
+            "name": "儲存照片",
+            "description": "將包裹或寄放物的照片存成本機 JPEG 檔案，並回傳檔案路徑。",
+            "fields": {
+                "entry_id": {
+                    "name": "整合項目",
+                    "description": "智生活整合項目（事件資料中的 entry_id）。"
+                },
+                "category": {
+                    "name": "類別",
+                    "description": "package（包裹）或 collection（寄放物）。"
+                },
+                "key": {
+                    "name": "項目識別",
+                    "description": "事件資料中的 image_key。"
+                },
+                "directory": {
+                    "name": "資料夾",
+                    "description": "存放的資料夾，須在允許寫入的資料夾內。預設為媒體資料夾下的 smartdaily_postal_ha。"
+                },
+                "wait": {
+                    "name": "等待秒數",
+                    "description": "照片尚未提供時（剛登記的項目）持續重試的秒數。"
+                }
+            }
         }
     }
 }
